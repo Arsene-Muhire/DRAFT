@@ -1,8 +1,5 @@
 # Flight Booking and Management Digital Tool
 
-## 📋 Project Overview
-
-A comprehensive Oracle PL/SQL database system designed to automate flight booking operations, manage seat allocation in real-time, implement dynamic pricing, and handle bookings efficiently. This project serves as the capstone for the Database Development with PL/SQL (INSY 8311) course.
 
 **Author:** MURAHIRA MUHIRE Arsene  
 **Student ID:** 27656  
@@ -18,64 +15,6 @@ A comprehensive Oracle PL/SQL database system designed to automate flight bookin
 **Lecturer:** Eric Maniraguha  
 **Academic Year:** 2025-2026, Semester I  
 **Completion Date:** December 7, 2025
-
----
-flight-booking-system/
-├── README.md
-├── database/
-│   ├── scripts/
-│   │   ├── 01_create_tables.sql
-│   │   ├── 02_insert_passengers.sql
-│   │   ├── 03_insert_flights.sql
-│   │   ├── 04_insert_bookings.sql
-│   │   ├── 05_insert_payments.sql
-│   │   ├── 06_insert_flight_history.sql
-│   │   └── 07_constraints_indexes.sql
-│   └── documentation/
-│       ├── data_dictionary.md
-│       ├── er_diagram.png
-│       └── normalization_notes.md
-├── plsql/
-│   ├── packages/
-│   │   ├── flight_booking_pkg_spec.sql
-│   │   └── flight_booking_pkg_body.sql
-│   ├── procedures/
-│   │   ├── create_booking.sql
-│   │   ├── update_booking_status.sql
-│   │   ├── cancel_booking.sql
-│   │   ├── process_payment.sql
-│   │   └── bulk_update_status.sql
-│   ├── functions/
-│   │   ├── calculate_booking_revenue.sql
-│   │   ├── validate_passenger_email.sql
-│   │   ├── get_flight_capacity.sql
-│   │   ├── calculate_total_revenue.sql
-│   │   └── get_passenger_name.sql
-│   └── triggers/
-│       ├── audit_log_setup.sql
-│       ├── holiday_management.sql
-│       ├── restriction_triggers.sql
-│       └── compound_trigger.sql
-├── queries/
-│   ├── data_verification.sql
-│   ├── analytics_queries.sql
-│   ├── window_functions.sql
-│   └── audit_queries.sql
-├── tests/
-│   ├── test_procedures.sql
-│   ├── test_functions.sql
-│   ├── test_triggers.sql
-│   └── test_results.md
-├── business_intelligence/
-│   ├── bi_requirements.md
-│   ├── dashboard_mockups/
-│   └── kpi_definitions.md
-└── screenshots/
-    ├── database_structure/
-    ├── data_samples/
-    ├── test_results/
-    └── audit_logs/
-```
 
 
 
@@ -153,41 +92,6 @@ The system is designed with 5 core entities in 3rd Normal Form (3NF):
 
 The system is designed with 5 core entities in 3rd Normal Form (3NF):
 
-```
-PASSENGERS (586-687)
-├── PASSENGER_ID (PK)
-├── FULL_NAME
-├── EMAIL
-├── PHONE
-├── PASSPORT_NUMBER
-├── LOYALTY_POINTS
-└── REGISTRATION_DATE
-
-FLIGHTS (1-204)
-├── FLIGHT_ID (PK)
-├── FLIGHT_NUMBER
-├── DEPARTURE_CITY
-├── ARRIVAL_CITY
-├── DEPARTURE_TIME
-├── ARRIVAL_TIME
-└── SEATS_AVAILABLE
-
-BOOKINGS (1-102)
-├── BOOKING_ID (PK)
-├── PASSENGER_ID (FK)
-├── FLIGHT_ID (FK)
-├── BOOKING_DATE
-└── STATUS (Confirmed/Cancelled/Waitlisted/Checked-in/No-show)
-
-PAYMENTS (1-102)
-├── BOOKING_ID (FK, PK)
-├── AMOUNT
-└── PAYMENT_METHOD
-
-FLIGHT_HISTORY
-├── FLIGHT_ID (FK)
-├── PASSENGER_ID (FK)
-└── TRAVEL_DATE
 ```
 
 ### Data Volume
