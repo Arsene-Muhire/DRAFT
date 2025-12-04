@@ -21,7 +21,7 @@ A comprehensive Oracle PL/SQL database system designed to automate flight bookin
 
 
 
-## PHASE 1:🎯 Problem Statement
+## PHASE I:🎯 Problem Statement
 
 Many flight booking systems struggle with:
 - Manual seat management
@@ -56,7 +56,7 @@ BI Potential: Real-time analytics on booking patterns, revenue optimization, cus
 
 
 
-## Phase II: 🔄 Business Process Model 
+## PHASE II: 🔄 Business Process Model 
 
 Key Business Processes:
 
@@ -85,7 +85,7 @@ Deliverable: UML/BPMN diagram showing swimlanes for each actor
 
     
 
-## Phase III: 🗂️ Logical Database Design 
+## PHASE III: 🗂️ Logical Database Design 
 
 Entity-Relationship Model
 The system is designed with 5 core entities in 3rd Normal Form (3NF):
@@ -114,13 +114,15 @@ Tablespaces: DATA, INDEXES, TEMPORARY
 
 ## Normalization:
 
-1NF: All attributes atomic, no repeating groups
-2NF: All non-key attributes fully dependent on primary key
-3NF: No transitive dependencies
+*1NF*: All attributes atomic, no repeating groups.
+
+*2NF*: All non-key attributes fully dependent on primary key.
+
+*3NF*: No transitive dependencies.
 
 
 
-## PHASE 4 Creat Pluggable Database
+## PHASE IV:  Pluggable Database creation
 ```sql
 -- Run as SYSDBA
 CREATE PLUGGABLE DATABASE WED_27656_arsene_FlightMS_DB
@@ -143,7 +145,7 @@ ALTER SESSION SET CONTAINER = WED_27656_arsene_FlightMS_DB;
 
 ---
 
-## phase  5: Table Implementation & Data Insertion
+## PHASE V: Table Implementation & Data Insertion
 
 #### 3. Create Tablespaces
 ```sql
@@ -417,7 +419,7 @@ WHERE AMOUNT <= 0;
 
 ---
 
-## 🔧 PHASE 6:  Database Interaction & Transaction 
+## 🔧 PHASE VI:  Database Interaction & Transaction 
 
 ### PART 1: CUSTOM EXCEPTIONS & ERROR LOG TABLE
 
@@ -999,7 +1001,7 @@ END flight_booking_pkg;
 ```
 
 
-# PART 4: WINDOW FUNCTIONS QUERIES
+### PART 4: WINDOW FUNCTIONS QUERIES
 
 #### Window Function 1: Rank passengers by spending
 
@@ -1203,7 +1205,7 @@ END;
 
 
 
-### PHASE VIII: Advanced Programming & Auditing
+## PHASE VIII: Advanced Programming & Auditing
 
 
 ```sql
