@@ -92,7 +92,6 @@ The system is designed with 5 core entities in 3rd Normal Form (3NF):
 
 The system is designed with 5 core entities in 3rd Normal Form (3NF):
 
-```
 
 ### Data Volume
 - **Passengers:** 102 records
@@ -112,7 +111,6 @@ The system is designed with 5 core entities in 3rd Normal Form (3NF):
 - **Database Type:** Pluggable Database (PDB)
 
 ### Database Configuration
-```
 Database Name: wed_27656_arsene_flightBooking_db
 Admin User: arsene
 Tablespaces: DATA, INDEXES, TEMPORARY
