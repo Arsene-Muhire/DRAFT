@@ -3,7 +3,9 @@
 
 **Author:** MURAHIRA MUHIRE Arsene  
 **Student ID:** 27656  
-**Institution:** Adventist University of Central Africa (AUCA)  # Flight Booking and Management Digital Tool
+**Institution:** Adventist University of Central Africa (AUCA)  
+
+
 
 ## 📋 Project Overview
 
