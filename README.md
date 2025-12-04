@@ -415,415 +415,1355 @@ WHERE AMOUNT <= 0;
 
 ---
 
-## 🔧 PL/SQL Package Implementation
+## 🔧 PHASE 6:  Database Interaction & Transaction 
 
-### Install the Package
+```SQL
+-- PART 2: PACKAGE SPECIFICATION (Public Interface)
+-- =====================================================
 
-#### Create Package Specification
-```sql
-CREATE OR REPLACE PACKAGE FLIGHT_BOOKING_PKG AS
+CREATE OR REPLACE PACKAGE flight_booking_pkg AS
     -- Custom Exceptions
-    E_INVALID_BOOKING EXCEPTION;
-    E_PASSENGER_NOT_FOUND EXCEPTION;
-    E_INVALID_PAYMENT EXCEPTION;
+    e_invalid_booking EXCEPTION;
+    e_insufficient_seats EXCEPTION;
+    e_invalid_payment EXCEPTION;
+    e_passenger_not_found EXCEPTION;
     
-    -- Procedures
-    PROCEDURE CREATE_BOOKING(
-        P_PASSENGER_ID IN NUMBER,
-        P_FLIGHT_ID IN NUMBER,
-        P_BOOKING_ID OUT NUMBER,
-        P_STATUS OUT VARCHAR2
+    -- Procedure Declarations
+    PROCEDURE create_booking(
+        p_passenger_id IN NUMBER,
+        p_flight_id IN NUMBER,
+        p_booking_date IN DATE DEFAULT SYSDATE,
+        p_booking_id OUT NUMBER,
+        p_status OUT VARCHAR2
     );
     
-    PROCEDURE UPDATE_BOOKING_STATUS(
-        P_BOOKING_ID IN NUMBER,
-        P_NEW_STATUS IN VARCHAR2,
-        P_SUCCESS OUT BOOLEAN
+    PROCEDURE update_booking_status(
+        p_booking_id IN NUMBER,
+        p_new_status IN VARCHAR2,
+        p_success OUT BOOLEAN
     );
     
-    PROCEDURE CANCEL_BOOKING(
-        P_BOOKING_ID IN NUMBER,
-        P_REFUND_AMOUNT OUT NUMBER
+    PROCEDURE cancel_booking(
+        p_booking_id IN NUMBER,
+        p_refund_amount OUT NUMBER
     );
     
-    -- Functions
-    FUNCTION CALCULATE_BOOKING_REVENUE(
-        P_BOOKING_ID IN NUMBER
+    PROCEDURE process_payment(
+        p_booking_id IN NUMBER,
+        p_amount IN NUMBER,
+        p_payment_method IN VARCHAR2,
+        p_payment_id OUT NUMBER
+    );
+    
+    PROCEDURE bulk_update_status(
+        p_old_status IN VARCHAR2,
+        p_new_status IN VARCHAR2,
+        p_updated_count OUT NUMBER
+    );
+    
+    -- Function Declarations
+    FUNCTION calculate_booking_revenue(
+        p_booking_id IN NUMBER
     ) RETURN NUMBER;
     
-    FUNCTION GET_FLIGHT_CAPACITY(
-        P_FLIGHT_ID IN NUMBER
+    FUNCTION validate_passenger_email(
+        p_email IN VARCHAR2
+    ) RETURN BOOLEAN;
+    
+    FUNCTION get_flight_capacity(
+        p_flight_id IN NUMBER
     ) RETURN NUMBER;
     
-    FUNCTION GET_PASSENGER_NAME(
-        P_PASSENGER_ID IN NUMBER
+    FUNCTION calculate_total_revenue(
+        p_start_date IN DATE DEFAULT NULL,
+        p_end_date IN DATE DEFAULT NULL
+    ) RETURN NUMBER;
+    
+    FUNCTION get_passenger_name(
+        p_passenger_id IN NUMBER
     ) RETURN VARCHAR2;
     
-END FLIGHT_BOOKING_PKG;
+    -- Cursor-based Procedure
+    PROCEDURE generate_booking_report(
+        p_status IN VARCHAR2 DEFAULT NULL
+    );
+    
+END flight_booking_pkg;
 /
-```
 
-**Screenshot:** *[Insert screenshot of package spec compilation success]*
+-- =====================================================
+-- PART 3: PACKAGE BODY (Implementation)
+-- =====================================================
 
----
+CREATE OR REPLACE PACKAGE BODY flight_booking_pkg AS
 
-#### Verify Package Created
-```sql
-SELECT OBJECT_NAME, OBJECT_TYPE, STATUS
-FROM USER_OBJECTS
-WHERE OBJECT_NAME = 'FLIGHT_BOOKING_PKG';
-```
+    -- Private procedure for error logging
+    PROCEDURE log_error(
+        p_error_code IN NUMBER,
+        p_error_msg IN VARCHAR2,
+        p_proc_name IN VARCHAR2
+    ) IS
+        PRAGMA AUTONOMOUS_TRANSACTION;
+    BEGIN
+        INSERT INTO error_log (error_code, error_message, procedure_name)
+        VALUES (p_error_code, p_error_msg, p_proc_name);
+        COMMIT;
+    END log_error;
 
-**Expected Output:**
-```
-OBJECT_NAME              OBJECT_TYPE      STATUS
------------------------- ---------------- -------
-FLIGHT_BOOKING_PKG       PACKAGE          VALID
-FLIGHT_BOOKING_PKG       PACKAGE BODY     VALID
-```
+    -- =====================================================
+    -- PROCEDURE 1: Create Booking
+    -- Purpose: Insert new booking with validation
+    -- Parameters: IN (passenger_id, flight_id), OUT (booking_id, status)
+    -- =====================================================
+    PROCEDURE create_booking(
+        p_passenger_id IN NUMBER,
+        p_flight_id IN NUMBER,
+        p_booking_date IN DATE DEFAULT SYSDATE,
+        p_booking_id OUT NUMBER,
+        p_status OUT VARCHAR2
+    ) IS
+        v_passenger_exists NUMBER;
+        v_flight_exists NUMBER;
+        v_next_booking_id NUMBER;
+    BEGIN
+        -- Validate passenger exists
+        SELECT COUNT(*) INTO v_passenger_exists
+        FROM passengers
+        WHERE passenger_id = p_passenger_id;
+        
+        IF v_passenger_exists = 0 THEN
+            RAISE e_passenger_not_found;
+        END IF;
+        
+        -- Validate flight exists
+        SELECT COUNT(*) INTO v_flight_exists
+        FROM flights
+        WHERE flight_id = p_flight_id;
+        
+        IF v_flight_exists = 0 THEN
+            RAISE_APPLICATION_ERROR(-20001, 'Flight does not exist');
+        END IF;
+        
+        -- Get next booking ID
+        SELECT NVL(MAX(booking_id), 0) + 1 INTO v_next_booking_id
+        FROM bookings;
+        
+        -- Insert booking
+        INSERT INTO bookings (booking_id, passenger_id, flight_id, booking_date, status)
+        VALUES (v_next_booking_id, p_passenger_id, p_flight_id, p_booking_date, 'Confirmed');
+        
+        p_booking_id := v_next_booking_id;
+        p_status := 'SUCCESS';
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Booking created successfully. Booking ID: ' || p_booking_id);
+        
+    EXCEPTION
+        WHEN e_passenger_not_found THEN
+            p_status := 'FAILED - Passenger not found';
+            log_error(SQLCODE, 'Passenger ID ' || p_passenger_id || ' not found', 'create_booking');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_status := 'FAILED - ' || SQLERRM;
+            log_error(SQLCODE, SQLERRM, 'create_booking');
+            ROLLBACK;
+    END create_booking;
 
-**Screenshot:** *[Insert screenshot of package objects]*
+    -- =====================================================
+    -- PROCEDURE 2: Update Booking Status
+    -- Purpose: Change booking status with validation
+    -- Parameters: IN (booking_id, new_status), OUT (success)
+    -- =====================================================
+    PROCEDURE update_booking_status(
+        p_booking_id IN NUMBER,
+        p_new_status IN VARCHAR2,
+        p_success OUT BOOLEAN
+    ) IS
+        v_current_status VARCHAR2(20);
+        v_booking_exists NUMBER;
+    BEGIN
+        -- Check if booking exists
+        SELECT COUNT(*) INTO v_booking_exists
+        FROM bookings
+        WHERE booking_id = p_booking_id;
+        
+        IF v_booking_exists = 0 THEN
+            RAISE e_invalid_booking;
+        END IF;
+        
+        -- Get current status
+        SELECT status INTO v_current_status
+        FROM bookings
+        WHERE booking_id = p_booking_id;
+        
+        -- Update status
+        UPDATE bookings
+        SET status = p_new_status
+        WHERE booking_id = p_booking_id;
+        
+        p_success := TRUE;
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Booking ' || p_booking_id || ' status updated from ' || 
+                            v_current_status || ' to ' || p_new_status);
+        
+    EXCEPTION
+        WHEN e_invalid_booking THEN
+            p_success := FALSE;
+            log_error(-20002, 'Booking ID ' || p_booking_id || ' does not exist', 'update_booking_status');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_success := FALSE;
+            log_error(SQLCODE, SQLERRM, 'update_booking_status');
+            ROLLBACK;
+    END update_booking_status;
 
----
+    -- =====================================================
+    -- PROCEDURE 3: Cancel Booking
+    -- Purpose: Cancel booking and calculate refund
+    -- Parameters: IN (booking_id), OUT (refund_amount)
+    -- =====================================================
+    PROCEDURE cancel_booking(
+        p_booking_id IN NUMBER,
+        p_refund_amount OUT NUMBER
+    ) IS
+        v_payment_amount NUMBER;
+    BEGIN
+        -- Get payment amount
+        SELECT amount INTO v_payment_amount
+        FROM payments
+        WHERE booking_id = p_booking_id;
+        
+        -- Calculate refund (90% refund policy)
+        p_refund_amount := v_payment_amount * 0.90;
+        
+        -- Update booking status
+        UPDATE bookings
+        SET status = 'Cancelled'
+        WHERE booking_id = p_booking_id;
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Booking cancelled. Refund amount: $' || 
+                            ROUND(p_refund_amount, 2));
+        
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            p_refund_amount := 0;
+            log_error(-20003, 'No payment found for booking ' || p_booking_id, 'cancel_booking');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_refund_amount := 0;
+            log_error(SQLCODE, SQLERRM, 'cancel_booking');
+            ROLLBACK;
+    END cancel_booking;
 
-## 🧪 Testing PL/SQL Procedures and Functions
+    -- =====================================================
+    -- PROCEDURE 4: Process Payment
+    -- Purpose: Record payment for booking
+    -- Parameters: IN (booking_id, amount, method), OUT (payment_id)
+    -- =====================================================
+    PROCEDURE process_payment(
+        p_booking_id IN NUMBER,
+        p_amount IN NUMBER,
+        p_payment_method IN VARCHAR2,
+        p_payment_id OUT NUMBER
+    ) IS
+        v_booking_exists NUMBER;
+    BEGIN
+        -- Validate amount
+        IF p_amount <= 0 THEN
+            RAISE e_invalid_payment;
+        END IF;
+        
+        -- Check booking exists
+        SELECT COUNT(*) INTO v_booking_exists
+        FROM bookings
+        WHERE booking_id = p_booking_id;
+        
+        IF v_booking_exists = 0 THEN
+            RAISE e_invalid_booking;
+        END IF;
+        
+        -- Insert payment (assuming PAYMENT_ID is auto-generated or managed)
+        INSERT INTO payments (booking_id, amount, payment_method)
+        VALUES (p_booking_id, p_amount, p_payment_method);
+        
+        p_payment_id := p_booking_id; -- Simplified for this example
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Payment processed: $' || p_amount || 
+                            ' via ' || p_payment_method);
+        
+    EXCEPTION
+        WHEN e_invalid_payment THEN
+            p_payment_id := NULL;
+            log_error(-20004, 'Invalid payment amount: ' || p_amount, 'process_payment');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_payment_id := NULL;
+            log_error(SQLCODE, SQLERRM, 'process_payment');
+            ROLLBACK;
+    END process_payment;
 
-### Test 1: Create New Booking
+    -- =====================================================
+    -- PROCEDURE 5: Bulk Update Status (Bulk Operations)
+    -- Purpose: Update multiple bookings at once
+    -- Parameters: IN (old_status, new_status), OUT (updated_count)
+    -- =====================================================
+    PROCEDURE bulk_update_status(
+        p_old_status IN VARCHAR2,
+        p_new_status IN VARCHAR2,
+        p_updated_count OUT NUMBER
+    ) IS
+        TYPE booking_id_tab IS TABLE OF bookings.booking_id%TYPE;
+        v_booking_ids booking_id_tab;
+    BEGIN
+        -- Bulk collect booking IDs
+        SELECT booking_id
+        BULK COLLECT INTO v_booking_ids
+        FROM bookings
+        WHERE status = p_old_status;
+        
+        -- Bulk update
+        FORALL i IN 1..v_booking_ids.COUNT
+            UPDATE bookings
+            SET status = p_new_status
+            WHERE booking_id = v_booking_ids(i);
+        
+        p_updated_count := SQL%ROWCOUNT;
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Updated ' || p_updated_count || 
+                            ' bookings from ' || p_old_status || 
+                            ' to ' || p_new_status);
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            p_updated_count := 0;
+            log_error(SQLCODE, SQLERRM, 'bulk_update_status');
+            ROLLBACK;
+    END bulk_update_status;
 
-```sql
-SET SERVEROUTPUT ON SIZE UNLIMITED;
+    -- =====================================================
+    -- FUNCTION 1: Calculate Booking Revenue
+    -- Purpose: Get total payment for a booking
+    -- Returns: Payment amount
+    -- =====================================================
+    FUNCTION calculate_booking_revenue(
+        p_booking_id IN NUMBER
+    ) RETURN NUMBER IS
+        v_revenue NUMBER := 0;
+    BEGIN
+        SELECT NVL(SUM(amount), 0)
+        INTO v_revenue
+        FROM payments
+        WHERE booking_id = p_booking_id;
+        
+        RETURN v_revenue;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'calculate_booking_revenue');
+            RETURN 0;
+    END calculate_booking_revenue;
 
+    -- =====================================================
+    -- FUNCTION 2: Validate Passenger Email
+    -- Purpose: Check if email format is valid
+    -- Returns: TRUE/FALSE
+    -- =====================================================
+    FUNCTION validate_passenger_email(
+        p_email IN VARCHAR2
+    ) RETURN BOOLEAN IS
+    BEGIN
+        -- Basic email validation (contains @ and .)
+        IF p_email LIKE '%_@__%.__%' THEN
+            RETURN TRUE;
+        ELSE
+            RETURN FALSE;
+        END IF;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'validate_passenger_email');
+            RETURN FALSE;
+    END validate_passenger_email;
+
+    -- =====================================================
+    -- FUNCTION 3: Get Flight Capacity
+    -- Purpose: Calculate available seats on flight
+    -- Returns: Number of available seats
+    -- =====================================================
+    FUNCTION get_flight_capacity(
+        p_flight_id IN NUMBER
+    ) RETURN NUMBER IS
+        v_booked_seats NUMBER := 0;
+        v_total_capacity NUMBER := 200; -- Assume 200 seats per flight
+    BEGIN
+        SELECT COUNT(*)
+        INTO v_booked_seats
+        FROM bookings
+        WHERE flight_id = p_flight_id
+        AND status IN ('Confirmed', 'Checked-in');
+        
+        RETURN v_total_capacity - v_booked_seats;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'get_flight_capacity');
+            RETURN 0;
+    END get_flight_capacity;
+
+    -- =====================================================
+    -- FUNCTION 4: Calculate Total Revenue
+    -- Purpose: Calculate revenue for date range
+    -- Returns: Total revenue
+    -- =====================================================
+    FUNCTION calculate_total_revenue(
+        p_start_date IN DATE DEFAULT NULL,
+        p_end_date IN DATE DEFAULT NULL
+    ) RETURN NUMBER IS
+        v_total_revenue NUMBER := 0;
+    BEGIN
+        IF p_start_date IS NULL AND p_end_date IS NULL THEN
+            SELECT NVL(SUM(amount), 0)
+            INTO v_total_revenue
+            FROM payments;
+        ELSE
+            SELECT NVL(SUM(p.amount), 0)
+            INTO v_total_revenue
+            FROM payments p
+            JOIN bookings b ON p.booking_id = b.booking_id
+            WHERE b.booking_date BETWEEN 
+                  NVL(p_start_date, b.booking_date) AND 
+                  NVL(p_end_date, b.booking_date);
+        END IF;
+        
+        RETURN v_total_revenue;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'calculate_total_revenue');
+            RETURN 0;
+    END calculate_total_revenue;
+
+    -- =====================================================
+    -- FUNCTION 5: Get Passenger Name (Lookup)
+    -- Purpose: Retrieve passenger full name
+    -- Returns: Full name
+    -- =====================================================
+    FUNCTION get_passenger_name(
+        p_passenger_id IN NUMBER
+    ) RETURN VARCHAR2 IS
+        v_full_name VARCHAR2(200);
+    BEGIN
+        SELECT first_name || ' ' || last_name
+        INTO v_full_name
+        FROM passengers
+        WHERE passenger_id = p_passenger_id;
+        
+        RETURN v_full_name;
+        
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN 'Unknown Passenger';
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'get_passenger_name');
+            RETURN 'Error';
+    END get_passenger_name;
+
+    -- =====================================================
+    -- PROCEDURE 6: Generate Booking Report (Cursor)
+    -- Purpose: Display booking details using explicit cursor
+    -- =====================================================
+    PROCEDURE generate_booking_report(
+        p_status IN VARCHAR2 DEFAULT NULL
+    ) IS
+        -- Explicit cursor
+        CURSOR c_bookings IS
+            SELECT b.booking_id, b.booking_date, b.status,
+                   p.first_name || ' ' || p.last_name AS passenger_name,
+                   f.flight_number, f.origin, f.destination,
+                   pay.amount
+            FROM bookings b
+            JOIN passengers p ON b.passenger_id = p.passenger_id
+            JOIN flights f ON b.flight_id = f.flight_id
+            LEFT JOIN payments pay ON b.booking_id = pay.booking_id
+            WHERE b.status = NVL(p_status, b.status)
+            ORDER BY b.booking_date DESC;
+        
+        v_booking c_bookings%ROWTYPE;
+        v_count NUMBER := 0;
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE('===== BOOKING REPORT =====');
+        DBMS_OUTPUT.PUT_LINE('Status Filter: ' || NVL(p_status, 'ALL'));
+        DBMS_OUTPUT.PUT_LINE('--------------------------');
+        
+        -- Open cursor
+        OPEN c_bookings;
+        
+        -- Fetch rows
+        LOOP
+            FETCH c_bookings INTO v_booking;
+            EXIT WHEN c_bookings%NOTFOUND;
+            
+            v_count := v_count + 1;
+            
+            DBMS_OUTPUT.PUT_LINE('Booking ID: ' || v_booking.booking_id);
+            DBMS_OUTPUT.PUT_LINE('Passenger: ' || v_booking.passenger_name);
+            DBMS_OUTPUT.PUT_LINE('Flight: ' || v_booking.flight_number || 
+                                ' (' || v_booking.origin || ' → ' || 
+                                v_booking.destination || ')');
+            DBMS_OUTPUT.PUT_LINE('Amount: $' || NVL(v_booking.amount, 0));
+            DBMS_OUTPUT.PUT_LINE('Status: ' || v_booking.status);
+            DBMS_OUTPUT.PUT_LINE('--------------------------');
+        END LOOP;
+        
+        -- Close cursor
+        CLOSE c_bookings;
+        
+        DBMS_OUTPUT.PUT_LINE('Total records: ' || v_count);
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF c_bookings%ISOPEN THEN
+                CLOSE c_bookings;
+            END IF;
+            log_error(SQLCODE, SQLERRM, 'generate_booking_report');
+    END generate_booking_report;
+
+END flight_booking_pkg;
+/
+
+-- =====================================================
+-- PART 4: WINDOW FUNCTIONS QUERIES
+-- =====================================================
+
+-- Window Function 1: Rank passengers by spending
+CREATE OR REPLACE VIEW v_passenger_spending_rank AS
+SELECT 
+    p.passenger_id,
+    p.first_name || ' ' || p.last_name AS passenger_name,
+    SUM(pay.amount) AS total_spent,
+    ROW_NUMBER() OVER (ORDER BY SUM(pay.amount) DESC) AS row_num,
+    RANK() OVER (ORDER BY SUM(pay.amount) DESC) AS rank,
+    DENSE_RANK() OVER (ORDER BY SUM(pay.amount) DESC) AS dense_rank
+FROM passengers p
+JOIN bookings b ON p.passenger_id = b.passenger_id
+JOIN payments pay ON b.booking_id = pay.booking_id
+GROUP BY p.passenger_id, p.first_name, p.last_name;
+
+-- Window Function 2: Payment trends with LAG/LEAD
+CREATE OR REPLACE VIEW v_payment_trends AS
+SELECT 
+    booking_id,
+    amount,
+    payment_method,
+    LAG(amount, 1) OVER (ORDER BY booking_id) AS previous_payment,
+    LEAD(amount, 1) OVER (ORDER BY booking_id) AS next_payment,
+    amount - LAG(amount, 1) OVER (ORDER BY booking_id) AS payment_change
+FROM payments;
+
+-- Window Function 3: Bookings per flight with running total
+CREATE OR REPLACE VIEW v_flight_booking_analysis AS
+SELECT 
+    f.flight_id,
+    f.flight_number,
+    f.origin || ' → ' || f.destination AS route,
+    COUNT(b.booking_id) AS total_bookings,
+    SUM(COUNT(b.booking_id)) OVER (ORDER BY f.flight_id) AS running_total,
+    ROUND(
+        RATIO_TO_REPORT(COUNT(b.booking_id)) OVER () * 100, 2
+    ) AS percentage_of_total
+FROM flights f
+LEFT JOIN bookings b ON f.flight_id = b.flight_id
+GROUP BY f.flight_id, f.flight_number, f.origin, f.destination;
+
+-- Window Function 4: Revenue by payment method with partitioning
+CREATE OR REPLACE VIEW v_payment_method_analytics AS
+SELECT 
+    payment_method,
+    booking_id,
+    amount,
+    SUM(amount) OVER (PARTITION BY payment_method) AS method_total,
+    AVG(amount) OVER (PARTITION BY payment_method) AS method_average,
+    ROW_NUMBER() OVER (PARTITION BY payment_method ORDER BY amount DESC) AS rank_in_method
+FROM payments;
+
+-- =====================================================
+-- PART 5: TESTING SCRIPT
+-- =====================================================
+
+-- Enable output
+SET SERVEROUTPUT ON;
+
+-- TEST 1: Create Booking
 DECLARE
-    V_BOOKING_ID NUMBER;
-    V_STATUS VARCHAR2(100);
+    v_booking_id NUMBER;
+    v_status VARCHAR2(100);
 BEGIN
     DBMS_OUTPUT.PUT_LINE('=== TEST 1: Create Booking ===');
-    
-    FLIGHT_BOOKING_PKG.CREATE_BOOKING(
-        P_PASSENGER_ID => 586,
-        P_FLIGHT_ID => 1,
-        P_BOOKING_ID => V_BOOKING_ID,
-        P_STATUS => V_STATUS
+    flight_booking_pkg.create_booking(
+        p_passenger_id => 586,
+        p_flight_id => 1,
+        p_booking_id => v_booking_id,
+        p_status => v_status
     );
-    
-    DBMS_OUTPUT.PUT_LINE('Result: ' || V_STATUS);
-    DBMS_OUTPUT.PUT_LINE('New Booking ID: ' || V_BOOKING_ID);
+    DBMS_OUTPUT.PUT_LINE('Result: ' || v_status);
+    DBMS_OUTPUT.PUT_LINE('');
 END;
 /
-```
 
-**Expected Output:**
-```
-=== TEST 1: Create Booking ===
-Booking created successfully. Booking ID: 103
-Result: SUCCESS
-New Booking ID: 103
-```
-
-**Screenshot:** *[Insert screenshot of test output]*
-
----
-
-**Verify the booking was created:**
-```sql
-SELECT * FROM BOOKINGS WHERE BOOKING_ID = 103;
-```
-
-**Screenshot:** *[Insert screenshot showing new booking record]*
-
----
-
-### Test 2: Update Booking Status
-
-```sql
+-- TEST 2: Update Booking Status
 DECLARE
-    V_SUCCESS BOOLEAN;
+    v_success BOOLEAN;
 BEGIN
     DBMS_OUTPUT.PUT_LINE('=== TEST 2: Update Booking Status ===');
-    
-    FLIGHT_BOOKING_PKG.UPDATE_BOOKING_STATUS(
-        P_BOOKING_ID => 1,
-        P_NEW_STATUS => 'Checked-in',
-        P_SUCCESS => V_SUCCESS
+    flight_booking_pkg.update_booking_status(
+        p_booking_id => 1,
+        p_new_status => 'Checked-in',
+        p_success => v_success
     );
-    
-    IF V_SUCCESS THEN
+    IF v_success THEN
         DBMS_OUTPUT.PUT_LINE('Status update: SUCCESS');
     ELSE
         DBMS_OUTPUT.PUT_LINE('Status update: FAILED');
     END IF;
+    DBMS_OUTPUT.PUT_LINE('');
 END;
 /
-```
 
-**Screenshot:** *[Insert screenshot of update test]*
-
----
-
-**Verify the status changed:**
-```sql
-SELECT BOOKING_ID, STATUS FROM BOOKINGS WHERE BOOKING_ID = 1;
-```
-
-**Screenshot:** *[Insert screenshot showing updated status]*
-
----
-
-### Test 3: Calculate Booking Revenue
-
-```sql
+-- TEST 3: Calculate Revenue Function
 DECLARE
-    V_REVENUE NUMBER;
+    v_revenue NUMBER;
 BEGIN
     DBMS_OUTPUT.PUT_LINE('=== TEST 3: Calculate Revenue ===');
-    
-    V_REVENUE := FLIGHT_BOOKING_PKG.CALCULATE_BOOKING_REVENUE(1);
-    DBMS_OUTPUT.PUT_LINE('Booking 1 Revenue: $' || V_REVENUE);
+    v_revenue := flight_booking_pkg.calculate_booking_revenue(1);
+    DBMS_OUTPUT.PUT_LINE('Booking 1 Revenue: $' || v_revenue);
+    DBMS_OUTPUT.PUT_LINE('');
 END;
 /
-```
 
-**Expected Output:**
-```
-=== TEST 3: Calculate Revenue ===
-Booking 1 Revenue: $450
-```
-
-**Screenshot:** *[Insert screenshot of revenue calculation]*
-
----
-
-### Test 4: Get Flight Capacity
-
-```sql
+-- TEST 4: Validate Email Function
 DECLARE
-    V_CAPACITY NUMBER;
+    v_valid BOOLEAN;
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('=== TEST 4: Flight Capacity ===');
-    
-    V_CAPACITY := FLIGHT_BOOKING_PKG.GET_FLIGHT_CAPACITY(1);
-    DBMS_OUTPUT.PUT_LINE('Available seats on Flight 1: ' || V_CAPACITY);
+    DBMS_OUTPUT.PUT_LINE('=== TEST 4: Email Validation ===');
+    v_valid := flight_booking_pkg.validate_passenger_email('test@example.com');
+    IF v_valid THEN
+        DBMS_OUTPUT.PUT_LINE('Email valid: TRUE');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('Email valid: FALSE');
+    END IF;
+    DBMS_OUTPUT.PUT_LINE('');
 END;
 /
-```
 
-**Screenshot:** *[Insert screenshot of capacity check]*
-
----
-
-### Test 5: Get Passenger Name (Lookup Function)
-
-```sql
+-- TEST 5: Get Flight Capacity
 DECLARE
-    V_NAME VARCHAR2(200);
+    v_capacity NUMBER;
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('=== TEST 5: Get Passenger Name ===');
-    
-    V_NAME := FLIGHT_BOOKING_PKG.GET_PASSENGER_NAME(586);
-    DBMS_OUTPUT.PUT_LINE('Passenger Name: ' || V_NAME);
+    DBMS_OUTPUT.PUT_LINE('=== TEST 5: Flight Capacity ===');
+    v_capacity := flight_booking_pkg.get_flight_capacity(1);
+    DBMS_OUTPUT.PUT_LINE('Available seats on Flight 1: ' || v_capacity);
+    DBMS_OUTPUT.PUT_LINE('');
 END;
 /
-```
 
-**Screenshot:** *[Insert screenshot of lookup function]*
-
----
-
-### Test 6: Cancel Booking with Refund
-
-```sql
-DECLARE
-    V_REFUND NUMBER;
+-- TEST 6: Generate Report (Cursor)
 BEGIN
-    DBMS_OUTPUT.PUT_LINE('=== TEST 6: Cancel Booking ===');
+    DBMS_OUTPUT.PUT_LINE('=== TEST 6: Booking Report ===');
+    flight_booking_pkg.generate_booking_report('Confirmed');
+END;
+/
+-- PART 2: PACKAGE SPECIFICATION (Public Interface)
+-- =====================================================
+
+CREATE OR REPLACE PACKAGE flight_booking_pkg AS
+    -- Custom Exceptions
+    e_invalid_booking EXCEPTION;
+    e_insufficient_seats EXCEPTION;
+    e_invalid_payment EXCEPTION;
+    e_passenger_not_found EXCEPTION;
     
-    FLIGHT_BOOKING_PKG.CANCEL_BOOKING(
-        P_BOOKING_ID => 2,
-        P_REFUND_AMOUNT => V_REFUND
+    -- Procedure Declarations
+    PROCEDURE create_booking(
+        p_passenger_id IN NUMBER,
+        p_flight_id IN NUMBER,
+        p_booking_date IN DATE DEFAULT SYSDATE,
+        p_booking_id OUT NUMBER,
+        p_status OUT VARCHAR2
     );
     
-    DBMS_OUTPUT.PUT_LINE('Refund Amount: $' || ROUND(V_REFUND, 2));
-END;
+    PROCEDURE update_booking_status(
+        p_booking_id IN NUMBER,
+        p_new_status IN VARCHAR2,
+        p_success OUT BOOLEAN
+    );
+    
+    PROCEDURE cancel_booking(
+        p_booking_id IN NUMBER,
+        p_refund_amount OUT NUMBER
+    );
+    
+    PROCEDURE process_payment(
+        p_booking_id IN NUMBER,
+        p_amount IN NUMBER,
+        p_payment_method IN VARCHAR2,
+        p_payment_id OUT NUMBER
+    );
+    
+    PROCEDURE bulk_update_status(
+        p_old_status IN VARCHAR2,
+        p_new_status IN VARCHAR2,
+        p_updated_count OUT NUMBER
+    );
+    
+    -- Function Declarations
+    FUNCTION calculate_booking_revenue(
+        p_booking_id IN NUMBER
+    ) RETURN NUMBER;
+    
+    FUNCTION validate_passenger_email(
+        p_email IN VARCHAR2
+    ) RETURN BOOLEAN;
+    
+    FUNCTION get_flight_capacity(
+        p_flight_id IN NUMBER
+    ) RETURN NUMBER;
+    
+    FUNCTION calculate_total_revenue(
+        p_start_date IN DATE DEFAULT NULL,
+        p_end_date IN DATE DEFAULT NULL
+    ) RETURN NUMBER;
+    
+    FUNCTION get_passenger_name(
+        p_passenger_id IN NUMBER
+    ) RETURN VARCHAR2;
+    
+    -- Cursor-based Procedure
+    PROCEDURE generate_booking_report(
+        p_status IN VARCHAR2 DEFAULT NULL
+    );
+    
+END flight_booking_pkg;
 /
-```
 
-**Screenshot:** *[Insert screenshot of cancellation test]*
+-- =====================================================
+-- PART 3: PACKAGE BODY (Implementation)
+-- =====================================================
 
----
+CREATE OR REPLACE PACKAGE BODY flight_booking_pkg AS
 
-**Verify cancellation in database:**
-```sql
-SELECT BOOKING_ID, STATUS FROM BOOKINGS WHERE BOOKING_ID = 2;
-```
+    -- Private procedure for error logging
+    PROCEDURE log_error(
+        p_error_code IN NUMBER,
+        p_error_msg IN VARCHAR2,
+        p_proc_name IN VARCHAR2
+    ) IS
+        PRAGMA AUTONOMOUS_TRANSACTION;
+    BEGIN
+        INSERT INTO error_log (error_code, error_message, procedure_name)
+        VALUES (p_error_code, p_error_msg, p_proc_name);
+        COMMIT;
+    END log_error;
 
-**Screenshot:** *[Insert screenshot showing cancelled status]*
+    -- =====================================================
+    -- PROCEDURE 1: Create Booking
+    -- Purpose: Insert new booking with validation
+    -- Parameters: IN (passenger_id, flight_id), OUT (booking_id, status)
+    -- =====================================================
+    PROCEDURE create_booking(
+        p_passenger_id IN NUMBER,
+        p_flight_id IN NUMBER,
+        p_booking_date IN DATE DEFAULT SYSDATE,
+        p_booking_id OUT NUMBER,
+        p_status OUT VARCHAR2
+    ) IS
+        v_passenger_exists NUMBER;
+        v_flight_exists NUMBER;
+        v_next_booking_id NUMBER;
+    BEGIN
+        -- Validate passenger exists
+        SELECT COUNT(*) INTO v_passenger_exists
+        FROM passengers
+        WHERE passenger_id = p_passenger_id;
+        
+        IF v_passenger_exists = 0 THEN
+            RAISE e_passenger_not_found;
+        END IF;
+        
+        -- Validate flight exists
+        SELECT COUNT(*) INTO v_flight_exists
+        FROM flights
+        WHERE flight_id = p_flight_id;
+        
+        IF v_flight_exists = 0 THEN
+            RAISE_APPLICATION_ERROR(-20001, 'Flight does not exist');
+        END IF;
+        
+        -- Get next booking ID
+        SELECT NVL(MAX(booking_id), 0) + 1 INTO v_next_booking_id
+        FROM bookings;
+        
+        -- Insert booking
+        INSERT INTO bookings (booking_id, passenger_id, flight_id, booking_date, status)
+        VALUES (v_next_booking_id, p_passenger_id, p_flight_id, p_booking_date, 'Confirmed');
+        
+        p_booking_id := v_next_booking_id;
+        p_status := 'SUCCESS';
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Booking created successfully. Booking ID: ' || p_booking_id);
+        
+    EXCEPTION
+        WHEN e_passenger_not_found THEN
+            p_status := 'FAILED - Passenger not found';
+            log_error(SQLCODE, 'Passenger ID ' || p_passenger_id || ' not found', 'create_booking');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_status := 'FAILED - ' || SQLERRM;
+            log_error(SQLCODE, SQLERRM, 'create_booking');
+            ROLLBACK;
+    END create_booking;
 
----
+    -- =====================================================
+    -- PROCEDURE 2: Update Booking Status
+    -- Purpose: Change booking status with validation
+    -- Parameters: IN (booking_id, new_status), OUT (success)
+    -- =====================================================
+    PROCEDURE update_booking_status(
+        p_booking_id IN NUMBER,
+        p_new_status IN VARCHAR2,
+        p_success OUT BOOLEAN
+    ) IS
+        v_current_status VARCHAR2(20);
+        v_booking_exists NUMBER;
+    BEGIN
+        -- Check if booking exists
+        SELECT COUNT(*) INTO v_booking_exists
+        FROM bookings
+        WHERE booking_id = p_booking_id;
+        
+        IF v_booking_exists = 0 THEN
+            RAISE e_invalid_booking;
+        END IF;
+        
+        -- Get current status
+        SELECT status INTO v_current_status
+        FROM bookings
+        WHERE booking_id = p_booking_id;
+        
+        -- Update status
+        UPDATE bookings
+        SET status = p_new_status
+        WHERE booking_id = p_booking_id;
+        
+        p_success := TRUE;
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Booking ' || p_booking_id || ' status updated from ' || 
+                            v_current_status || ' to ' || p_new_status);
+        
+    EXCEPTION
+        WHEN e_invalid_booking THEN
+            p_success := FALSE;
+            log_error(-20002, 'Booking ID ' || p_booking_id || ' does not exist', 'update_booking_status');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_success := FALSE;
+            log_error(SQLCODE, SQLERRM, 'update_booking_status');
+            ROLLBACK;
+    END update_booking_status;
 
-## 📈 Window Functions and Analytics
+    -- =====================================================
+    -- PROCEDURE 3: Cancel Booking
+    -- Purpose: Cancel booking and calculate refund
+    -- Parameters: IN (booking_id), OUT (refund_amount)
+    -- =====================================================
+    PROCEDURE cancel_booking(
+        p_booking_id IN NUMBER,
+        p_refund_amount OUT NUMBER
+    ) IS
+        v_payment_amount NUMBER;
+    BEGIN
+        -- Get payment amount
+        SELECT amount INTO v_payment_amount
+        FROM payments
+        WHERE booking_id = p_booking_id;
+        
+        -- Calculate refund (90% refund policy)
+        p_refund_amount := v_payment_amount * 0.90;
+        
+        -- Update booking status
+        UPDATE bookings
+        SET status = 'Cancelled'
+        WHERE booking_id = p_booking_id;
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Booking cancelled. Refund amount: $' || 
+                            ROUND(p_refund_amount, 2));
+        
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            p_refund_amount := 0;
+            log_error(-20003, 'No payment found for booking ' || p_booking_id, 'cancel_booking');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_refund_amount := 0;
+            log_error(SQLCODE, SQLERRM, 'cancel_booking');
+            ROLLBACK;
+    END cancel_booking;
 
-### Query 1: Rank Passengers by Spending
+    -- =====================================================
+    -- PROCEDURE 4: Process Payment
+    -- Purpose: Record payment for booking
+    -- Parameters: IN (booking_id, amount, method), OUT (payment_id)
+    -- =====================================================
+    PROCEDURE process_payment(
+        p_booking_id IN NUMBER,
+        p_amount IN NUMBER,
+        p_payment_method IN VARCHAR2,
+        p_payment_id OUT NUMBER
+    ) IS
+        v_booking_exists NUMBER;
+    BEGIN
+        -- Validate amount
+        IF p_amount <= 0 THEN
+            RAISE e_invalid_payment;
+        END IF;
+        
+        -- Check booking exists
+        SELECT COUNT(*) INTO v_booking_exists
+        FROM bookings
+        WHERE booking_id = p_booking_id;
+        
+        IF v_booking_exists = 0 THEN
+            RAISE e_invalid_booking;
+        END IF;
+        
+        -- Insert payment (assuming PAYMENT_ID is auto-generated or managed)
+        INSERT INTO payments (booking_id, amount, payment_method)
+        VALUES (p_booking_id, p_amount, p_payment_method);
+        
+        p_payment_id := p_booking_id; -- Simplified for this example
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Payment processed: $' || p_amount || 
+                            ' via ' || p_payment_method);
+        
+    EXCEPTION
+        WHEN e_invalid_payment THEN
+            p_payment_id := NULL;
+            log_error(-20004, 'Invalid payment amount: ' || p_amount, 'process_payment');
+            ROLLBACK;
+        WHEN OTHERS THEN
+            p_payment_id := NULL;
+            log_error(SQLCODE, SQLERRM, 'process_payment');
+            ROLLBACK;
+    END process_payment;
 
-```sql
+    -- =====================================================
+    -- PROCEDURE 5: Bulk Update Status (Bulk Operations)
+    -- Purpose: Update multiple bookings at once
+    -- Parameters: IN (old_status, new_status), OUT (updated_count)
+    -- =====================================================
+    PROCEDURE bulk_update_status(
+        p_old_status IN VARCHAR2,
+        p_new_status IN VARCHAR2,
+        p_updated_count OUT NUMBER
+    ) IS
+        TYPE booking_id_tab IS TABLE OF bookings.booking_id%TYPE;
+        v_booking_ids booking_id_tab;
+    BEGIN
+        -- Bulk collect booking IDs
+        SELECT booking_id
+        BULK COLLECT INTO v_booking_ids
+        FROM bookings
+        WHERE status = p_old_status;
+        
+        -- Bulk update
+        FORALL i IN 1..v_booking_ids.COUNT
+            UPDATE bookings
+            SET status = p_new_status
+            WHERE booking_id = v_booking_ids(i);
+        
+        p_updated_count := SQL%ROWCOUNT;
+        
+        COMMIT;
+        
+        DBMS_OUTPUT.PUT_LINE('Updated ' || p_updated_count || 
+                            ' bookings from ' || p_old_status || 
+                            ' to ' || p_new_status);
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            p_updated_count := 0;
+            log_error(SQLCODE, SQLERRM, 'bulk_update_status');
+            ROLLBACK;
+    END bulk_update_status;
+
+    -- =====================================================
+    -- FUNCTION 1: Calculate Booking Revenue
+    -- Purpose: Get total payment for a booking
+    -- Returns: Payment amount
+    -- =====================================================
+    FUNCTION calculate_booking_revenue(
+        p_booking_id IN NUMBER
+    ) RETURN NUMBER IS
+        v_revenue NUMBER := 0;
+    BEGIN
+        SELECT NVL(SUM(amount), 0)
+        INTO v_revenue
+        FROM payments
+        WHERE booking_id = p_booking_id;
+        
+        RETURN v_revenue;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'calculate_booking_revenue');
+            RETURN 0;
+    END calculate_booking_revenue;
+
+    -- =====================================================
+    -- FUNCTION 2: Validate Passenger Email
+    -- Purpose: Check if email format is valid
+    -- Returns: TRUE/FALSE
+    -- =====================================================
+    FUNCTION validate_passenger_email(
+        p_email IN VARCHAR2
+    ) RETURN BOOLEAN IS
+    BEGIN
+        -- Basic email validation (contains @ and .)
+        IF p_email LIKE '%_@__%.__%' THEN
+            RETURN TRUE;
+        ELSE
+            RETURN FALSE;
+        END IF;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'validate_passenger_email');
+            RETURN FALSE;
+    END validate_passenger_email;
+
+    -- =====================================================
+    -- FUNCTION 3: Get Flight Capacity
+    -- Purpose: Calculate available seats on flight
+    -- Returns: Number of available seats
+    -- =====================================================
+    FUNCTION get_flight_capacity(
+        p_flight_id IN NUMBER
+    ) RETURN NUMBER IS
+        v_booked_seats NUMBER := 0;
+        v_total_capacity NUMBER := 200; -- Assume 200 seats per flight
+    BEGIN
+        SELECT COUNT(*)
+        INTO v_booked_seats
+        FROM bookings
+        WHERE flight_id = p_flight_id
+        AND status IN ('Confirmed', 'Checked-in');
+        
+        RETURN v_total_capacity - v_booked_seats;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'get_flight_capacity');
+            RETURN 0;
+    END get_flight_capacity;
+
+    -- =====================================================
+    -- FUNCTION 4: Calculate Total Revenue
+    -- Purpose: Calculate revenue for date range
+    -- Returns: Total revenue
+    -- =====================================================
+    FUNCTION calculate_total_revenue(
+        p_start_date IN DATE DEFAULT NULL,
+        p_end_date IN DATE DEFAULT NULL
+    ) RETURN NUMBER IS
+        v_total_revenue NUMBER := 0;
+    BEGIN
+        IF p_start_date IS NULL AND p_end_date IS NULL THEN
+            SELECT NVL(SUM(amount), 0)
+            INTO v_total_revenue
+            FROM payments;
+        ELSE
+            SELECT NVL(SUM(p.amount), 0)
+            INTO v_total_revenue
+            FROM payments p
+            JOIN bookings b ON p.booking_id = b.booking_id
+            WHERE b.booking_date BETWEEN 
+                  NVL(p_start_date, b.booking_date) AND 
+                  NVL(p_end_date, b.booking_date);
+        END IF;
+        
+        RETURN v_total_revenue;
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'calculate_total_revenue');
+            RETURN 0;
+    END calculate_total_revenue;
+
+    -- =====================================================
+    -- FUNCTION 5: Get Passenger Name (Lookup)
+    -- Purpose: Retrieve passenger full name
+    -- Returns: Full name
+    -- =====================================================
+    FUNCTION get_passenger_name(
+        p_passenger_id IN NUMBER
+    ) RETURN VARCHAR2 IS
+        v_full_name VARCHAR2(200);
+    BEGIN
+        SELECT first_name || ' ' || last_name
+        INTO v_full_name
+        FROM passengers
+        WHERE passenger_id = p_passenger_id;
+        
+        RETURN v_full_name;
+        
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN 'Unknown Passenger';
+        WHEN OTHERS THEN
+            log_error(SQLCODE, SQLERRM, 'get_passenger_name');
+            RETURN 'Error';
+    END get_passenger_name;
+
+    -- =====================================================
+    -- PROCEDURE 6: Generate Booking Report (Cursor)
+    -- Purpose: Display booking details using explicit cursor
+    -- =====================================================
+    PROCEDURE generate_booking_report(
+        p_status IN VARCHAR2 DEFAULT NULL
+    ) IS
+        -- Explicit cursor
+        CURSOR c_bookings IS
+            SELECT b.booking_id, b.booking_date, b.status,
+                   p.first_name || ' ' || p.last_name AS passenger_name,
+                   f.flight_number, f.origin, f.destination,
+                   pay.amount
+            FROM bookings b
+            JOIN passengers p ON b.passenger_id = p.passenger_id
+            JOIN flights f ON b.flight_id = f.flight_id
+            LEFT JOIN payments pay ON b.booking_id = pay.booking_id
+            WHERE b.status = NVL(p_status, b.status)
+            ORDER BY b.booking_date DESC;
+        
+        v_booking c_bookings%ROWTYPE;
+        v_count NUMBER := 0;
+    BEGIN
+        DBMS_OUTPUT.PUT_LINE('===== BOOKING REPORT =====');
+        DBMS_OUTPUT.PUT_LINE('Status Filter: ' || NVL(p_status, 'ALL'));
+        DBMS_OUTPUT.PUT_LINE('--------------------------');
+        
+        -- Open cursor
+        OPEN c_bookings;
+        
+        -- Fetch rows
+        LOOP
+            FETCH c_bookings INTO v_booking;
+            EXIT WHEN c_bookings%NOTFOUND;
+            
+            v_count := v_count + 1;
+            
+            DBMS_OUTPUT.PUT_LINE('Booking ID: ' || v_booking.booking_id);
+            DBMS_OUTPUT.PUT_LINE('Passenger: ' || v_booking.passenger_name);
+            DBMS_OUTPUT.PUT_LINE('Flight: ' || v_booking.flight_number || 
+                                ' (' || v_booking.origin || ' → ' || 
+                                v_booking.destination || ')');
+            DBMS_OUTPUT.PUT_LINE('Amount: $' || NVL(v_booking.amount, 0));
+            DBMS_OUTPUT.PUT_LINE('Status: ' || v_booking.status);
+            DBMS_OUTPUT.PUT_LINE('--------------------------');
+        END LOOP;
+        
+        -- Close cursor
+        CLOSE c_bookings;
+        
+        DBMS_OUTPUT.PUT_LINE('Total records: ' || v_count);
+        
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF c_bookings%ISOPEN THEN
+                CLOSE c_bookings;
+            END IF;
+            log_error(SQLCODE, SQLERRM, 'generate_booking_report');
+    END generate_booking_report;
+
+END flight_booking_pkg;
+/
+
+-- =====================================================
+-- PART 4: WINDOW FUNCTIONS QUERIES
+-- =====================================================
+
+-- Window Function 1: Rank passengers by spending
+CREATE OR REPLACE VIEW v_passenger_spending_rank AS
 SELECT 
-    P.PASSENGER_ID,
-    P.FULL_NAME AS PASSENGER_NAME,
-    SUM(PAY.AMOUNT) AS TOTAL_SPENT,
-    ROW_NUMBER() OVER (ORDER BY SUM(PAY.AMOUNT) DESC) AS ROW_NUM,
-    RANK() OVER (ORDER BY SUM(PAY.AMOUNT) DESC) AS RANK_NUM,
-    DENSE_RANK() OVER (ORDER BY SUM(PAY.AMOUNT) DESC) AS DENSE_RANK_NUM
-FROM PASSENGERS P
-JOIN BOOKINGS B ON P.PASSENGER_ID = B.PASSENGER_ID
-JOIN PAYMENTS PAY ON B.BOOKING_ID = PAY.BOOKING_ID
-GROUP BY P.PASSENGER_ID, P.FULL_NAME
-ORDER BY TOTAL_SPENT DESC
-FETCH FIRST 10 ROWS ONLY;
-```
+    p.passenger_id,
+    p.first_name || ' ' || p.last_name AS passenger_name,
+    SUM(pay.amount) AS total_spent,
+    ROW_NUMBER() OVER (ORDER BY SUM(pay.amount) DESC) AS row_num,
+    RANK() OVER (ORDER BY SUM(pay.amount) DESC) AS rank,
+    DENSE_RANK() OVER (ORDER BY SUM(pay.amount) DESC) AS dense_rank
+FROM passengers p
+JOIN bookings b ON p.passenger_id = b.passenger_id
+JOIN payments pay ON b.booking_id = pay.booking_id
+GROUP BY p.passenger_id, p.first_name, p.last_name;
 
-**Screenshot:** *[Insert screenshot of top 10 spending passengers]*
-
----
-
-### Query 2: Payment Trends with LAG/LEAD
-
-```sql
+-- Window Function 2: Payment trends with LAG/LEAD
+CREATE OR REPLACE VIEW v_payment_trends AS
 SELECT 
-    BOOKING_ID,
-    AMOUNT,
-    PAYMENT_METHOD,
-    LAG(AMOUNT, 1) OVER (ORDER BY BOOKING_ID) AS PREVIOUS_PAYMENT,
-    LEAD(AMOUNT, 1) OVER (ORDER BY BOOKING_ID) AS NEXT_PAYMENT,
-    AMOUNT - LAG(AMOUNT, 1) OVER (ORDER BY BOOKING_ID) AS PAYMENT_CHANGE
-FROM PAYMENTS
-WHERE ROWNUM <= 10
-ORDER BY BOOKING_ID;
-```
+    booking_id,
+    amount,
+    payment_method,
+    LAG(amount, 1) OVER (ORDER BY booking_id) AS previous_payment,
+    LEAD(amount, 1) OVER (ORDER BY booking_id) AS next_payment,
+    amount - LAG(amount, 1) OVER (ORDER BY booking_id) AS payment_change
+FROM payments;
 
-**Screenshot:** *[Insert screenshot of payment trends]*
-
----
-
-### Query 3: Running Total of Bookings per Flight
-
-```sql
+-- Window Function 3: Bookings per flight with running total
+CREATE OR REPLACE VIEW v_flight_booking_analysis AS
 SELECT 
-    F.FLIGHT_ID,
-    F.FLIGHT_NUMBER,
-    F.DEPARTURE_CITY || ' -> ' || F.ARRIVAL_CITY AS ROUTE,
-    COUNT(B.BOOKING_ID) AS TOTAL_BOOKINGS,
-    SUM(COUNT(B.BOOKING_ID)) OVER (ORDER BY F.FLIGHT_ID) AS RUNNING_TOTAL,
-    ROUND(RATIO_TO_REPORT(COUNT(B.BOOKING_ID)) OVER () * 100, 2) AS PCT_OF_TOTAL
-FROM FLIGHTS F
-LEFT JOIN BOOKINGS B ON F.FLIGHT_ID = B.FLIGHT_ID
-GROUP BY F.FLIGHT_ID, F.FLIGHT_NUMBER, F.DEPARTURE_CITY, F.ARRIVAL_CITY
-ORDER BY TOTAL_BOOKINGS DESC
-FETCH FIRST 15 ROWS ONLY;
-```
+    f.flight_id,
+    f.flight_number,
+    f.origin || ' → ' || f.destination AS route,
+    COUNT(b.booking_id) AS total_bookings,
+    SUM(COUNT(b.booking_id)) OVER (ORDER BY f.flight_id) AS running_total,
+    ROUND(
+        RATIO_TO_REPORT(COUNT(b.booking_id)) OVER () * 100, 2
+    ) AS percentage_of_total
+FROM flights f
+LEFT JOIN bookings b ON f.flight_id = b.flight_id
+GROUP BY f.flight_id, f.flight_number, f.origin, f.destination;
 
-**Screenshot:** *[Insert screenshot of flight booking analysis]*
-
----
-
-### Query 4: Revenue by Payment Method with Partitioning
-
-```sql
+-- Window Function 4: Revenue by payment method with partitioning
+CREATE OR REPLACE VIEW v_payment_method_analytics AS
 SELECT 
-    PAYMENT_METHOD,
-    BOOKING_ID,
-    AMOUNT,
-    SUM(AMOUNT) OVER (PARTITION BY PAYMENT_METHOD) AS METHOD_TOTAL,
-    ROUND(AVG(AMOUNT) OVER (PARTITION BY PAYMENT_METHOD), 2) AS METHOD_AVERAGE,
-    ROW_NUMBER() OVER (PARTITION BY PAYMENT_METHOD ORDER BY AMOUNT DESC) AS RANK_IN_METHOD
-FROM PAYMENTS
-WHERE ROWNUM <= 20
-ORDER BY PAYMENT_METHOD, RANK_IN_METHOD;
-```
+    payment_method,
+    booking_id,
+    amount,
+    SUM(amount) OVER (PARTITION BY payment_method) AS method_total,
+    AVG(amount) OVER (PARTITION BY payment_method) AS method_average,
+    ROW_NUMBER() OVER (PARTITION BY payment_method ORDER BY amount DESC) AS rank_in_method
+FROM payments;
 
-**Screenshot:** *[Insert screenshot of partitioned revenue analysis]*
+-- =====================================================
+-- PART 5: TESTING SCRIPT
+-- =====================================================
 
----
+-- Enable output
+SET SERVEROUTPUT ON;
 
-## PHASE VIII: 🔒 Triggers and Business Rules
-
-### Create Audit Log Table
-
-```sql
-CREATE TABLE AUDIT_LOG (
-    AUDIT_ID NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    TABLE_NAME VARCHAR2(50),
-    OPERATION VARCHAR2(10),
-    USER_NAME VARCHAR2(50),
-    OPERATION_DATE TIMESTAMP DEFAULT SYSTIMESTAMP,
-    STATUS VARCHAR2(20),
-    ERROR_MESSAGE VARCHAR2(500)
-);
-```
-
-**Screenshot:** *[Insert screenshot of audit table creation]*
-
----
-
-### Create Holiday Management Table
-
-```sql
-CREATE TABLE PUBLIC_HOLIDAYS (
-    HOLIDAY_DATE DATE PRIMARY KEY,
-    HOLIDAY_NAME VARCHAR2(100),
-    COUNTRY VARCHAR2(50) DEFAULT 'Rwanda'
-);
-
--- Insert upcoming holidays
-INSERT INTO PUBLIC_HOLIDAYS VALUES (TO_DATE('2025-12-25', 'YYYY-MM-DD'), 'Christmas Day', 'Rwanda');
-INSERT INTO PUBLIC_HOLIDAYS VALUES (TO_DATE('2025-12-26', 'YYYY-MM-DD'), 'Boxing Day', 'Rwanda');
-INSERT INTO PUBLIC_HOLIDAYS VALUES (TO_DATE('2026-01-01', 'YYYY-MM-DD'), 'New Year Day', 'Rwanda');
-COMMIT;
-```
-
-**Verify holidays inserted:**
-```sql
-SELECT * FROM PUBLIC_HOLIDAYS ORDER BY HOLIDAY_DATE;
-```
-
-**Screenshot:** *[Insert screenshot of holiday table data]*
-
----
-
-### Create Restriction Check Function
-
-```sql
-CREATE OR REPLACE FUNCTION IS_OPERATION_ALLOWED
-RETURN BOOLEAN
-IS
-    V_DAY_NAME VARCHAR2(10);
-    V_IS_HOLIDAY NUMBER;
+-- TEST 1: Create Booking
+DECLARE
+    v_booking_id NUMBER;
+    v_status VARCHAR2(100);
 BEGIN
-    -- Get current day name
-    V_DAY_NAME := TO_CHAR(SYSDATE, 'DY', 'NLS_DATE_LANGUAGE=ENGLISH');
-    
-    -- Check if today is a weekday (Mon-Fri)
-    IF V_DAY_NAME IN ('MON', 'TUE', 'WED', 'THU', 'FRI') THEN
-        RETURN FALSE; -- Operations not allowed on weekdays
-    END IF;
-    
-    -- Check if today is a public holiday
-    SELECT COUNT(*)
-    INTO V_IS_HOLIDAY
-    FROM PUBLIC_HOLIDAYS
-    WHERE TRUNC(HOLIDAY_DATE) = TRUNC(SYSDATE);
-    
-    IF V_IS_HOLIDAY > 0 THEN
-        RETURN FALSE; -- Operations not allowed on holidays
-    END IF;
-    
-    RETURN TRUE; -- Operations allowed (weekend, not holiday)
+    DBMS_OUTPUT.PUT_LINE('=== TEST 1: Create Booking ===');
+    flight_booking_pkg.create_booking(
+        p_passenger_id => 586,
+        p_flight_id => 1,
+        p_booking_id => v_booking_id,
+        p_status => v_status
+    );
+    DBMS_OUTPUT.PUT_LINE('Result: ' || v_status);
+    DBMS_OUTPUT.PUT_LINE('');
 END;
 /
-```
 
-**Screenshot:** *[Insert screenshot of function compilation]*
+-- TEST 2: Update Booking Status
+DECLARE
+    v_success BOOLEAN;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 2: Update Booking Status ===');
+    flight_booking_pkg.update_booking_status(
+        p_booking_id => 1,
+        p_new_status => 'Checked-in',
+        p_success => v_success
+    );
+    IF v_success THEN
+        DBMS_OUTPUT.PUT_LINE('Status update: SUCCESS');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('Status update: FAILED');
+    END IF;
+    DBMS_OUTPUT.PUT_LINE('');
+END;
+/
 
----
+-- TEST 3: Calculate Revenue Function
+DECLARE
+    v_revenue NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 3: Calculate Revenue ===');
+    v_revenue := flight_booking_pkg.calculate_booking_revenue(1);
+    DBMS_OUTPUT.PUT_LINE('Booking 1 Revenue: $' || v_revenue);
+    DBMS_OUTPUT.PUT_LINE('');
+END;
+/
 
+-- TEST 4: Validate Email Function
+DECLARE
+    v_valid BOOLEAN;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 4: Email Validation ===');
+    v_valid := flight_booking_pkg.validate_passenger_email('test@example.com');
+    IF v_valid THEN
+        DBMS_OUTPUT.PUT_LINE('Email valid: TRUE');
+    ELSE
+        DBMS_OUTPUT.PUT_LINE('Email valid: FALSE');
+    END IF;
+    DBMS_OUTPUT.PUT_LINE('');
+END;
+/
+
+-- TEST 5: Get Flight Capacity
+DECLARE
+    v_capacity NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 5: Flight Capacity ===');
+    v_capacity := flight_booking_pkg.get_flight_capacity(1);
+    DBMS_OUTPUT.PUT_LINE('Available seats on Flight 1: ' || v_capacity);
+    DBMS_OUTPUT.PUT_LINE('');
+END;
+/
+
+-- TEST 6: Generate Report (Cursor)
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 6: Booking Report ===');
+    flight_booking_pkg.generate_booking_report('Confirmed');
+END;
+/
+
+-- TEST 7: Calculate Total Revenue
+DECLARE
+    v_total NUMBER;
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 7: Total Revenue ===');
+    v_total := flight_booking_pkg.calculate_total_revenue();
+    DBMS_OUTPUT.PUT_LINE('Total Revenue: $' || ROUND(v_total, 2));
+    DBMS_OUTPUT.PUT_LINE('');
+END;
+/
+
+-- TEST 8: Get Passenger Name
+DECLARE
+    v_name VARCHAR2(200);
+BEGIN
+    DBMS_OUTPUT.PUT_LINE('=== TEST 8: Get Passenger Name ===');
+    v_name := flight_booking_pkg.get_passenger_name(586);
+    DBMS_OUTPUT.PUT_LINE('Passenger Name: ' || v_name);
+    DBMS_OUTPUT.PUT_LINE('');
+END;
+/NN
 ### Create Restriction Trigger for BOOKINGS
 
 ```sql
