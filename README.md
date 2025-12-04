@@ -60,25 +60,31 @@ BI Potential: Real-time analytics on booking patterns, revenue optimization, cus
 
 Key Business Processes:
 
-Passenger Registration → Create passenger profile with contact details
-Flight Search & Selection → Browse available flights by route/date
-Seat Availability Check → Real-time verification of seat capacity
-Booking Creation → Reserve seat and generate booking confirmation
-Payment Processing → Handle multiple payment methods securely
-Booking Management → Allow cancellations, modifications, check-ins
-Waitlist Management → Auto-promote when seats become available
+*Passenger Registration* → Create passenger profile with contact details.
 
-System Actors:
+*Flight Search & Selection* → Browse available flights by route/date.
 
-Passengers: Book flights, make payments, manage bookings
-Airline Staff: Manage flights, process refunds, handle special requests
-System: Automate seat allocation, pricing, waitlist promotion
+*Seat Availability Check* → Real-time verification of seat capacity.
 
-MIS Relevance:
+*Booking Creation* → Reserve seat and generate booking confirmation.
 
-Supports operational decisions (capacity planning)
-Enables strategic decisions (pricing optimization)
-Provides tactical insights (demand forecasting)
+*Payment Processing* → Handle multiple payment methods securely.
+
+*Booking Management* → Allow cancellations, modifications, check-ins.
+
+*Waitlist Management* → Auto-promote when seats become available.
+
+###### System Actors:
+
+Passengers: Book flights, make payments, manage bookings.
+Airline Staff: Manage flights, process refunds, handle special requests.
+System: Automate seat allocation, pricing, waitlist promotion.
+
+###### MIS Relevance:
+
+Supports operational decisions (capacity planning).
+Enables strategic decisions (pricing optimization).
+Provides tactical insights (demand forecasting).
 
 Deliverable: UML/BPMN diagram showing swimlanes for each actor
 
@@ -87,8 +93,6 @@ Deliverable: UML/BPMN diagram showing swimlanes for each actor
 
 ## PHASE III: 🗂️ Logical Database Design 
 
-Entity-Relationship Model
-The system is designed with 5 core entities in 3rd Normal Form (3NF):
 
 ### Entity Relationship Model
 
