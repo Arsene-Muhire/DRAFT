@@ -100,40 +100,22 @@ The system is designed with 5 core entities in 3rd Normal Form (3NF):
 - **Payments:** 102 records
 - **Flight History:** 102 records
 
----
 
-## 🔧 Technology Stack
-
-- **Database:** Oracle 21c
-- **Language:** PL/SQL
-- **Tools:** SQL Developer, Oracle SQL*Plus
-- **Version Control:** GitHub
-- **Database Type:** Pluggable Database (PDB)
 
 ### Database Configuration
 Database Name: wed_27656_arsene_flightBooking_db
 Admin User: arsene
 Tablespaces: DATA, INDEXES, TEMPORARY
-Archive Logging: ENABLED
-```
-
----
 
 
----
+
+
 ## Normalization:
 
 1NF: All attributes atomic, no repeating groups
 2NF: All non-key attributes fully dependent on primary key
 3NF: No transitive dependencies
 
-BI Considerations:
-
-Fact Tables: BOOKINGS (transactional), PAYMENTS (financial)
-Dimension Tables: PASSENGERS, FLIGHTS, TIME (derived)
-Audit Trail: AUDIT_LOG for complete operation history
-
-Deliverable: ER diagram + data dictionary
 
 
 ## PHASE 4 Creat Pluggable Database
