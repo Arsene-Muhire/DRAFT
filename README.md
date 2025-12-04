@@ -1,4 +1,4 @@
-# Flight Booking and Management Digital Tool
+# ✈️ Flight Booking and Management Digital Tool
 
 
 **Author:** MURAHIRA MUHIRE Arsene  
@@ -999,7 +999,7 @@ END flight_booking_pkg;
 
 # PART 4: WINDOW FUNCTIONS QUERIES
 
--- Window Function 1: Rank passengers by spending
+#### Window Function 1: Rank passengers by spending
 
 
 ```sql
@@ -1204,6 +1204,8 @@ END;
 ### PHASE VIII: Advanced Programming & Auditing
 
 
+```sql
+
 CREATE TABLE public_holidays (
     holiday_id NUMBER PRIMARY KEY,
     holiday_name VARCHAR2(100) NOT NULL,
@@ -1212,8 +1214,13 @@ CREATE TABLE public_holidays (
     created_date DATE DEFAULT SYSDATE
 );
 
--- Create sequence for holiday_id
+```
+
+#### Create sequence for holiday_id
+
 CREATE SEQUENCE seq_holiday_id START WITH 1 INCREMENT BY 1;
+
+```sql
 
 -- Insert upcoming public holidays (December 2025 - January 2026)
 INSERT INTO public_holidays (holiday_id, holiday_name, holiday_date, description)
@@ -1230,9 +1237,11 @@ VALUES (seq_holiday_id.NEXTVAL, 'Liberation Day', TO_DATE('2026-01-07','YYYY-MM-
 
 COMMIT;
 
--- ============================================================================
--- STEP 2: AUDIT LOG TABLE
--- ============================================================================
+```
+
+
+#### STEP 2: AUDIT LOG TABLE
+```sql
 
 CREATE TABLE audit_log (
     audit_id NUMBER PRIMARY KEY,
@@ -1249,8 +1258,15 @@ CREATE TABLE audit_log (
     session_id NUMBER
 );
 
+```
+
 -- Create sequence for audit_id
-CREATE SEQUENCE seq_audit_id START WITH 1 INCREMENT BY 1;
+
+##### CREATE SEQUENCE seq_audit_id START WITH 1 INCREMENT BY 1;
+
+```sql
+
+
 
 -- Create index for faster queries
 CREATE INDEX idx_audit_date ON audit_log(operation_date);
@@ -1259,10 +1275,13 @@ CREATE INDEX idx_audit_table ON audit_log(table_name);
 
 COMMIT;
 
--- ============================================================================
--- STEP 3: AUDIT LOGGING FUNCTION
--- ============================================================================
+```
 
+
+
+-- STEP 3: AUDIT LOGGING FUNCTION
+
+```sql
 CREATE OR REPLACE FUNCTION log_audit_entry(
     p_table_name VARCHAR2,
     p_operation_type VARCHAR2,
@@ -1290,8 +1309,12 @@ BEGIN
            SYS_CONTEXT('USERENV', 'SESSIONID')
     INTO v_ip_address, v_session_id
     FROM DUAL;
+```
     
-    -- Generate new audit ID
+##### Generate new audit ID
+
+```SQL
+
     v_audit_id := seq_audit_id.NEXTVAL;
     
     -- Insert audit log entry
@@ -1333,9 +1356,11 @@ EXCEPTION
 END log_audit_entry;
 /
 
--- ============================================================================
--- STEP 4: RESTRICTION CHECK FUNCTION
--- ============================================================================
+```
+
+
+##### STEP 4: RESTRICTION CHECK FUNCTION
+```SQL
 
 CREATE OR REPLACE FUNCTION check_operation_allowed(
     p_operation_type VARCHAR2,
@@ -1391,13 +1416,15 @@ EXCEPTION
 END check_operation_allowed;
 /
 
--- ============================================================================
--- STEP 5: SIMPLE TRIGGERS FOR EACH TABLE
--- ============================================================================
+```
 
--- ============================================================================
--- TRIGGER 1: PASSENGERS TABLE RESTRICTION
--- ============================================================================
+#### STEP 5: SIMPLE TRIGGERS FOR EACH TABLE
+
+
+
+##### TRIGGER 1: PASSENGERS TABLE RESTRICTION
+
+```SQL
 
 CREATE OR REPLACE TRIGGER trg_passengers_restrict
 BEFORE INSERT OR UPDATE OR DELETE ON passengers
@@ -1453,11 +1480,13 @@ BEGIN
     END IF;
 END;
 /
+```
 
--- ============================================================================
--- TRIGGER 2: FLIGHTS TABLE RESTRICTION
--- ============================================================================
 
+
+#####    TRIGGER 2: FLIGHTS TABLE RESTRICTION
+
+```SQL
 CREATE OR REPLACE TRIGGER trg_flights_restrict
 BEFORE INSERT OR UPDATE OR DELETE ON flights
 FOR EACH ROW
@@ -1509,11 +1538,12 @@ BEGIN
     END IF;
 END;
 /
+```
 
--- ============================================================================
--- TRIGGER 3: BOOKINGS TABLE RESTRICTION
--- ============================================================================
 
+ #### TRIGGER 3: BOOKINGS TABLE RESTRICTION
+ 
+```SQL
 CREATE OR REPLACE TRIGGER trg_bookings_restrict
 BEFORE INSERT OR UPDATE OR DELETE ON bookings
 FOR EACH ROW
@@ -1561,10 +1591,13 @@ BEGIN
     END IF;
 END;
 /
+```
 
--- ============================================================================
--- STEP 6: COMPOUND TRIGGER (Advanced Example for PAYMENTS)
--- ============================================================================
+
+
+#### STEP 6: COMPOUND TRIGGER (Advanced Example for PAYMENTS)
+
+```SQL
 
 CREATE OR REPLACE TRIGGER trg_payments_compound
 FOR INSERT OR UPDATE OR DELETE ON payments
@@ -1663,17 +1696,17 @@ COMPOUND TRIGGER
 END trg_payments_compound;
 /
 
--- ============================================================================
--- TESTING SECTION
--- ============================================================================
+```
+
+#### TESTING SECTION
 
 SET SERVEROUTPUT ON;
 
-PROMPT ============================================================================
-PROMPT TESTING: Business Rule Restrictions and Auditing
-PROMPT ============================================================================
+##### PROMPT TESTING: Business Rule Restrictions and Auditing
 
--- Test Query 1: Check current day
+#### Test Query 1: Check current day
+```SQL
+
 SELECT 
     TO_CHAR(SYSDATE, 'DAY') AS current_day,
     TO_CHAR(SYSDATE, 'D') AS day_number,
@@ -1683,22 +1716,31 @@ SELECT
     END AS operation_status,
     SYSDATE AS current_datetime
 FROM DUAL;
+```
 
--- Test Query 2: Check upcoming holidays
+
+#### Test Query 2: Check upcoming holidays
+
+
 PROMPT
 PROMPT Upcoming Public Holidays:
+
+```SQL
+
 SELECT holiday_name, TO_CHAR(holiday_date, 'DAY DD-MON-YYYY') AS holiday_date
 FROM public_holidays
 WHERE holiday_date >= TRUNC(SYSDATE)
 ORDER BY holiday_date;
 
--- ============================================================================
--- TEST 1: INSERT ON WEEKDAY (Should be DENIED)
--- ============================================================================
-PROMPT
-PROMPT ============================================================================
+```
+
+#### TEST 1: INSERT ON WEEKDAY (Should be DENIED)
+
+
 PROMPT TEST 1: Attempting INSERT on current day...
-PROMPT ============================================================================
+
+
+```SQL
 
 BEGIN
     INSERT INTO passengers (full_name, email, phone, passport_number, loyalty_points)
@@ -1712,13 +1754,13 @@ EXCEPTION
 END;
 /
 
--- ============================================================================
--- TEST 2: UPDATE ON CURRENT DAY
--- ============================================================================
-PROMPT
-PROMPT ============================================================================
+````
+
+#### TEST 2: UPDATE ON CURRENT DAY
+
 PROMPT TEST 2: Attempting UPDATE on current day...
-PROMPT ============================================================================
+
+```SQL
 
 BEGIN
     UPDATE passengers 
@@ -1733,13 +1775,14 @@ EXCEPTION
 END;
 /
 
--- ============================================================================
--- TEST 3: DELETE ON CURRENT DAY
--- ============================================================================
-PROMPT
-PROMPT ============================================================================
+```
+
+#### TEST 3: DELETE ON CURRENT DAY
+
+
 PROMPT TEST 3: Attempting DELETE on current day...
-PROMPT ============================================================================
+
+```SQL
 
 BEGIN
     DELETE FROM bookings WHERE booking_id = 999;
@@ -1751,15 +1794,13 @@ EXCEPTION
         ROLLBACK;
 END;
 /
+```
 
--- ============================================================================
--- AUDIT LOG QUERIES
--- ============================================================================
+#### AUDIT LOG QUERIES
 
-PROMPT
-PROMPT ============================================================================
 PROMPT AUDIT LOG: All Operation Attempts (Last 10)
-PROMPT ============================================================================
+
+```SQL
 
 SELECT 
     audit_id,
@@ -1773,13 +1814,14 @@ SELECT
     session_id
 FROM audit_log
 ORDER BY audit_id DESC
+
 FETCH FIRST 10 ROWS ONLY;
+```
 
-PROMPT
-PROMPT ============================================================================
-PROMPT AUDIT LOG: Denied Attempts Summary
-PROMPT ============================================================================
 
+#### PROMPT AUDIT LOG: Denied Attempts Summary
+
+```SQL
 SELECT 
     table_name,
     operation_type,
@@ -1812,6 +1854,10 @@ ORDER BY
         WHEN 'FRIDAY' THEN 6
         WHEN 'SATURDAY' THEN 7
     END;
+```
+
+Result
+
 
 PROMPT
 PROMPT ============================================================================
